@@ -5,6 +5,7 @@ NSString *const kMASPreferencesWindowControllerDidChangeViewNotification = @"MAS
 
 static NSString *const kMASPreferencesFrameTopLeftKey = @"MASPreferences Frame Top Left";
 static NSString *const kMASPreferencesSelectedViewKey = @"MASPreferences Selected Identifier View";
+static NSString *const kMASPreferencesSegementedControlIndentifier = @"MASPreferences SegementedControl Indentifier";
 
 static NSString * PreferencesKeyForViewBounds (NSString *identifier)
 {
@@ -36,6 +37,13 @@ static NSString * PreferencesKeyForViewBounds (NSString *identifier)
     return [self initWithViewControllers:viewControllers title:nil];
 }
 
+- (instancetype)initWithViewControllers:(NSArray *)viewControllers useSegmenetedControl: (BOOL)useSegmenetedControl {
+    if ((self = [self initWithViewControllers:viewControllers title:nil])) {
+        _useSegmenetedControl = useSegmenetedControl;
+    }
+    return self;
+}
+
 - (instancetype)initWithViewControllers:(NSArray *)viewControllers title:(NSString *)title
 {
 	NSParameterAssert(viewControllers.count > 0);
@@ -45,9 +53,12 @@ static NSString * PreferencesKeyForViewBounds (NSString *identifier)
 		_viewControllers = [viewControllers mutableCopy];
         _minimumViewRects = [[NSMutableDictionary alloc] init];
         _title = [title copy];
+        _useSegmenetedControl = false;
     }
     return self;
 }
+
+
 
 - (void)dealloc
 {
@@ -64,24 +75,44 @@ static NSString * PreferencesKeyForViewBounds (NSString *identifier)
 {
 	NSParameterAssert(viewController);
 	[_viewControllers addObject: viewController];
-	[_toolbar insertItemWithItemIdentifier: viewController.viewIdentifier atIndex: ([_viewControllers count] - 1)];
-	[_toolbar validateVisibleItems];
+    if (_useSegmenetedControl) {
+        for (NSToolbarItem* item in self.window.toolbar.items) {
+            if (item.itemIdentifier == kMASPreferencesSegementedControlIndentifier) {
+                NSSegmentedControl* tabControl = (NSSegmentedControl*)item.view;
+                tabControl.segmentCount++;
+                [tabControl setLabel:viewController.toolbarItemLabel forSegment:tabControl.segmentCount - 1];
+                break;
+            }
+        }
+    }
+    else {
+        [_toolbar insertItemWithItemIdentifier: viewController.viewIdentifier atIndex: ([_viewControllers count] - 1)];
+        [_toolbar validateVisibleItems];
+    }
 }
 
 #pragma mark -
 
 - (void)windowDidLoad
 {
-    BOOL hasImages = NO;
-    for (id viewController in self.viewControllers)
-        if ([viewController respondsToSelector:@selector(toolbarItemImage)])
-            hasImages = YES;
-
-    if(hasImages == NO)
-        [[[self window] toolbar] setDisplayMode:NSToolbarDisplayModeLabelOnly];
-
+    if (!_useSegmenetedControl) {
+        BOOL hasImages = NO;
+        for (id viewController in self.viewControllers)
+            if ([viewController respondsToSelector:@selector(toolbarItemImage)])
+                hasImages = YES;
+        
+        if(hasImages == NO)
+            [[[self window] toolbar] setDisplayMode:NSToolbarDisplayModeLabelOnly];
+    }
+    
     if ([self.title length] > 0)
         [[self window] setTitle:self.title];
+    else {
+        if (_useSegmenetedControl) {
+            self.window.styleMask |= NSWindowStyleMaskUnifiedTitleAndToolbar;
+            self.window.titleVisibility = NSWindowTitleHidden;
+        }
+    }
 
     if ([self.viewControllers count])
         self.selectedViewController = [self viewControllerForIdentifier:[[NSUserDefaults standardUserDefaults] stringForKey:kMASPreferencesSelectedViewKey]] ?: [self firstViewController];
@@ -130,13 +161,22 @@ static NSString * PreferencesKeyForViewBounds (NSString *identifier)
 
 - (NSArray *)toolbarItemIdentifiers
 {
-    NSMutableArray *identifiers = [NSMutableArray arrayWithCapacity:_viewControllers.count];
-    for (id viewController in _viewControllers)
-        if (viewController == [NSNull null])
-            [identifiers addObject:NSToolbarFlexibleSpaceItemIdentifier];
-        else
-            [identifiers addObject:[viewController viewIdentifier]];
-    return identifiers;
+    if (_useSegmenetedControl) {
+        return @[
+                 NSToolbarFlexibleSpaceItemIdentifier,
+                 kMASPreferencesSegementedControlIndentifier,
+                 NSToolbarFlexibleSpaceItemIdentifier
+        ];
+    }
+    else {
+        NSMutableArray *identifiers = [NSMutableArray arrayWithCapacity:_viewControllers.count];
+        for (id viewController in _viewControllers)
+            if (viewController == [NSNull null])
+                [identifiers addObject:NSToolbarFlexibleSpaceItemIdentifier];
+            else
+                [identifiers addObject:[viewController viewIdentifier]];
+        return identifiers;
+    }
 }
 
 #pragma mark -
@@ -171,16 +211,36 @@ static NSString * PreferencesKeyForViewBounds (NSString *identifier)
 - (NSToolbarItem *)toolbar:(NSToolbar * __unused)toolbar itemForItemIdentifier:(NSString *)itemIdentifier willBeInsertedIntoToolbar:(BOOL __unused)flag
 {
     NSToolbarItem *toolbarItem = [[NSToolbarItem alloc] initWithItemIdentifier:itemIdentifier];
-    NSArray *identifiers = self.toolbarItemIdentifiers;
-    NSUInteger controllerIndex = [identifiers indexOfObject:itemIdentifier];
-    if (controllerIndex != NSNotFound)
-    {
-        id <MASPreferencesViewController> controller = [_viewControllers objectAtIndex:controllerIndex];
-        if ([controller respondsToSelector:@selector(toolbarItemImage)])
-            toolbarItem.image = controller.toolbarItemImage;
-        toolbarItem.label = controller.toolbarItemLabel;
-        toolbarItem.target = self;
-        toolbarItem.action = @selector(toolbarItemDidClick:);
+    if (_useSegmenetedControl) {
+        if (itemIdentifier == kMASPreferencesSegementedControlIndentifier) {
+            NSSegmentedControl* tabControl = [[NSSegmentedControl alloc] init];
+            NSInteger tabIndex = 0;
+            tabControl.segmentCount = [_viewControllers count];
+            for (id <MASPreferencesViewController> viewController in _viewControllers) {
+                [tabControl setLabel:viewController.toolbarItemLabel forSegment:tabIndex];
+                ++tabIndex;
+            }
+            tabControl.controlSize = NSControlSizeSmall;
+            tabControl.font = [NSFont systemFontOfSize: [NSFont systemFontSizeForControlSize: NSControlSizeSmall]];
+            [tabControl sizeToFit];
+
+            tabControl.target = self;
+            tabControl.action = @selector(segmentedControlDidClick:);
+            toolbarItem.view = tabControl;
+        }
+    }
+    else {
+        NSArray *identifiers = self.toolbarItemIdentifiers;
+        NSUInteger controllerIndex = [identifiers indexOfObject:itemIdentifier];
+        if (controllerIndex != NSNotFound)
+        {
+            id <MASPreferencesViewController> controller = [_viewControllers objectAtIndex:controllerIndex];
+            if ([controller respondsToSelector:@selector(toolbarItemImage)])
+                toolbarItem.image = controller.toolbarItemImage;
+            toolbarItem.label = controller.toolbarItemLabel;
+            toolbarItem.target = self;
+            toolbarItem.action = @selector(toolbarItemDidClick:);
+        }
     }
     return toolbarItem;
 }
@@ -232,7 +292,19 @@ static NSString * PreferencesKeyForViewBounds (NSString *identifier)
         self.window.title = label;
     }
 
-    [[self.window toolbar] setSelectedItemIdentifier:controller.viewIdentifier];
+    NSSegmentedControl* tabControl;
+    if (_useSegmenetedControl) {
+        for (NSToolbarItem* item in self.window.toolbar.items) {
+            if (item.itemIdentifier == kMASPreferencesSegementedControlIndentifier) {
+                tabControl = ((NSSegmentedControl*)item.view);
+                break;
+            }
+        }
+        tabControl.selectedSegment = [_viewControllers indexOfObject:controller];
+    }
+    else {
+        [[self.window toolbar] setSelectedItemIdentifier:controller.viewIdentifier];
+    }
 
     // Record new selected controller in user defaults
     [[NSUserDefaults standardUserDefaults] setObject:controller.viewIdentifier forKey:kMASPreferencesSelectedViewKey];
@@ -283,7 +355,8 @@ static NSString * PreferencesKeyForViewBounds (NSString *identifier)
     
     [self.window setContentView:controllerView];
     [self.window recalculateKeyViewLoop];
-    if ([self.window firstResponder] == self.window) {
+
+    if ([self.window firstResponder] == self.window || [self.window firstResponder] == tabControl) {
         if ([controller respondsToSelector:@selector(initialKeyView)])
             [self.window makeFirstResponder:[controller initialKeyView]];
         else
@@ -303,6 +376,12 @@ static NSString * PreferencesKeyForViewBounds (NSString *identifier)
 {
     if ([sender respondsToSelector:@selector(itemIdentifier)])
         self.selectedViewController = [self viewControllerForIdentifier:[sender itemIdentifier]];
+}
+
+- (void)segmentedControlDidClick:(id)sender
+{
+    if ([sender respondsToSelector:@selector(indexOfSelectedItem)])
+        self.selectedViewController = [_viewControllers objectAtIndex: [sender indexOfSelectedItem]];
 }
 
 #pragma mark -

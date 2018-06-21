@@ -31,6 +31,7 @@ __attribute__((__visibility__("default")))
     NSMutableArray *_viewControllers;
     NSMutableDictionary *_minimumViewRects;
     NSString *_title;
+    BOOL _useSegmenetedControl;
     NSViewController <MASPreferencesViewController> *_selectedViewController;
     NSToolbar * __unsafe_unretained _toolbar;
 }
@@ -79,6 +80,7 @@ __attribute__((__visibility__("default")))
  * @return A new controller with title depending on selected view controller.
  */
 - (instancetype)initWithViewControllers:(NSArray *)viewControllers;
+- (instancetype)initWithViewControllers:(NSArray *)viewControllers useSegmenetedControl: (BOOL)useSegmenetedControl;
 
 /*!
  * Appends new panel to the Preferences window.
